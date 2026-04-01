@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
 from sp_pdf_judger.ui_html import render_result_html, render_summary_card
@@ -70,7 +71,9 @@ def main() -> None:
         st.markdown(render_summary_card(result.summary), unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown(render_result_html(result), unsafe_allow_html=True)
+
+    html = render_result_html(result)
+    components.html(html, height=1600, scrolling=True)
 
 
 if __name__ == "__main__":
