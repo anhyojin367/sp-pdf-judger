@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import locale
 import subprocess
 import sys
 from pathlib import Path
@@ -11,12 +12,17 @@ from .schemas import ExtractedRecord
 
 def _record_from_dict(d: dict) -> ExtractedRecord:
     return ExtractedRecord(
+        record_type=d.get("record_type") or "test",
         section_number=d.get("section_number"),
         section_title=d.get("section_title"),
         test_name=d.get("test_name"),
+        content_label=d.get("content_label"),
+        content=d.get("content"),
         criteria=d.get("criteria"),
         result=d.get("result"),
         method=d.get("method"),
+        test_date=d.get("test_date"),
+        test_period=d.get("test_period"),
         remarks=d.get("remarks"),
         page_start=d.get("page_start"),
         page_end=d.get("page_end"),
@@ -25,16 +31,25 @@ def _record_from_dict(d: dict) -> ExtractedRecord:
     )
 
 
+def _is_test_record(d: dict) -> bool:
+    if d.get("record_type") != "test":
+        return False
+    if d.get("test_name"):
+        return True
+    return any(d.get(k) for k in ("criteria", "result", "method", "test_date", "test_period", "remarks"))
+
+
+def _is_content_record(d: dict) -> bool:
+    if d.get("record_type") != "content":
+        return False
+    return bool(d.get("content"))
+
+
 def extract_records(pdf_path: Path, output_dir: Path) -> List[ExtractedRecord]:
-    """
-    원본 json추출.py를 수정하지 않고 그대로 실행해서
-    output_dir/05_records.json 을 생성한 뒤 다시 읽어서 반환한다.
-    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     project_root = Path(__file__).resolve().parent.parent
     extractor_script = project_root / "json추출.py"
-
     if not extractor_script.exists():
         raise FileNotFoundError(f"추출기 파일을 찾을 수 없습니다: {extractor_script}")
 
@@ -51,7 +66,8 @@ def extract_records(pdf_path: Path, output_dir: Path) -> List[ExtractedRecord]:
         cmd,
         capture_output=True,
         text=True,
-        encoding="utf-8",
+        encoding=locale.getpreferredencoding(False),
+        errors="replace",
     )
 
     if result.returncode != 0:
@@ -68,4 +84,5 @@ def extract_records(pdf_path: Path, output_dir: Path) -> List[ExtractedRecord]:
     with open(records_json_path, "r", encoding="utf-8") as f:
         loaded = json.load(f)
 
+    loaded = [x for x in loaded if _is_test_record(x) or _is_content_record(x)]
     return [_record_from_dict(x) for x in loaded]

@@ -17,6 +17,8 @@ class Config:
     criteria_labels: List[str] = field(default_factory=list)
     result_labels: List[str] = field(default_factory=list)
     method_labels: List[str] = field(default_factory=list)
+    date_labels: List[str] = field(default_factory=list)
+    period_labels: List[str] = field(default_factory=list)
     remarks_labels: List[str] = field(default_factory=list)
     heading_patterns: List[re.Pattern] = field(default_factory=list)
     heading_forbidden_patterns: List[re.Pattern] = field(default_factory=list)
@@ -47,6 +49,11 @@ def build_config() -> Config:
         "분석 법": "분석법",
         "품질 기준": "품질기준",
         "허용 기준": "허용기준",
+        "시험 일자": "시험일자",
+        "시험 날짜": "시험일자",
+        "시험 기간": "시험기간",
+        "시험 일": "시험일",
+        "로트 번호": "로트번호",
     }
 
     field_map = {
@@ -69,17 +76,23 @@ def build_config() -> Config:
         "분석방법": "method",
         "분석법": "method",
         "방법": "method",
+        "시험일자": "test_date",
+        "시험기간": "test_period",
+        "시험일": "test_date",
         "비고": "remarks",
         "특이사항": "remarks",
         "참고": "remarks",
     }
 
     heading_patterns = [
-        re.compile(r"^(\d+(?:\.\d+)*)\s+(.+)$"),
-        re.compile(r"^(\d+(?:\.\d+)*)\.\s+(.+)$"),
+        re.compile(r"^(\d+(?:\.\d+)+)\s*([가-힣A-Za-z(].+)$"),
+        re.compile(r"^(\d+(?:\.\d+)*)\s+[가-힣A-Za-z(].+$"),
+        re.compile(r"^(\d+(?:\.\d+)*)\s*[.)]\s+(.+)$"),
     ]
 
     heading_forbidden_patterns = [
+        re.compile(r"^(이하|이상|적합|부적합|페이지)$"),
+        re.compile(r"^%"),
         re.compile(r"^[\d.\-~/\s%]+$"),
         re.compile(r"^\d+(?:\.\d+)?\s*(mL|ml|mg|g|kg|L|IU|CFU|PFU|%|ppm|ppb|μL|uL|℃|°C)\b"),
         re.compile(r"^\d+(?:\.\d+)?\s*(바이알|상자|병|개|정|캡슐|앰플)\b"),
@@ -92,6 +105,8 @@ def build_config() -> Config:
     noise_patterns = [
         re.compile(r"^\s*한미약품\s*주식회사\s*$"),
         re.compile(r"^\s*Summary Protocol.*$", re.I),
+        re.compile(r"^\s*Summary\s*Protocol\s*for\s*Production\s*and\s*Quality\s*control\s*:?\s*$", re.I),
+        re.compile(r"^\s*SummaryProtocolforProductionandQualitycontrol:?\s*$", re.I),
         re.compile(r"^\s*Japanese encephalitis Vaccine.*$", re.I),
         re.compile(r"^\s*제조번호\s*[:：].*$"),
         re.compile(r"^\s*-\s*\d+\s*-\s*$"),
@@ -116,6 +131,7 @@ def build_config() -> Config:
         re.compile(r".+검사$"),
         re.compile(r".+분석$"),
         re.compile(r".+측정$"),
+        re.compile(r".+안정성시험$"),
     ]
 
     test_name_negative_patterns = [
@@ -146,18 +162,25 @@ def build_config() -> Config:
         re.compile(r".*한미약품.*"),
         re.compile(r".*Summary Protocol.*", re.I),
         re.compile(r".*Japanese encephalitis Vaccine.*", re.I),
-        re.compile(r".*(바이알|상자|mL|ml|mg|kg| pH범위|접종량).*"),
+        re.compile(r".*(바이알|상자|mL|ml|mg|kg| pH범위|접종량).*")
     ]
 
     return Config(
-        True, label_aliases, field_map,
-        ["시험명", "시험항목", "항목명", "항목", "시험"],
-        ["시험기준", "기준", "규격", "품질기준", "허용기준"],
-        ["시험결과", "결과", "측정결과", "실험결과"],
-        ["시험방법", "시험법", "분석방법", "분석법", "방법"],
-        ["비고", "특이사항", "참고"],
-        heading_patterns, heading_forbidden_patterns, noise_patterns,
-        test_name_positive_patterns, test_name_negative_patterns
+        save_intermediate=True,
+        label_aliases=label_aliases,
+        field_map=field_map,
+        test_name_labels=["시험명", "시험항목", "항목명", "항목", "시험"],
+        criteria_labels=["시험기준", "기준", "규격", "품질기준", "허용기준"],
+        result_labels=["시험결과", "결과", "측정결과", "실험결과"],
+        method_labels=["시험방법", "시험법", "분석방법", "분석법", "방법"],
+        date_labels=["시험일자", "시험일"],
+        period_labels=["시험기간"],
+        remarks_labels=["비고", "특이사항", "참고"],
+        heading_patterns=heading_patterns,
+        heading_forbidden_patterns=heading_forbidden_patterns,
+        noise_patterns=noise_patterns,
+        test_name_positive_patterns=test_name_positive_patterns,
+        test_name_negative_patterns=test_name_negative_patterns,
     )
 
 
@@ -165,10 +188,19 @@ CFG = build_config()
 
 
 @dataclass
+class OrderedElement:
+    kind: str
+    text: str
+    top: float
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class RawPage:
     page_num: int
     text: str
     tables: List[List[List[str]]]
+    ordered_elements: List[OrderedElement] = field(default_factory=list)
 
 
 @dataclass
@@ -201,12 +233,17 @@ class Block:
 
 @dataclass
 class Record:
+    record_type: str
     section_number: Optional[str]
     section_title: Optional[str]
     test_name: Optional[str]
+    content_label: Optional[str]
+    content: Optional[str]
     criteria: Optional[str]
     result: Optional[str]
     method: Optional[str]
+    test_date: Optional[str]
+    test_period: Optional[str]
     remarks: Optional[str]
     page_start: int
     page_end: int
@@ -268,7 +305,7 @@ def is_leader_only_line(text: str) -> bool:
     t = clean_text(text)
     if not t:
         return True
-    return bool(re.fullmatch(r"[_\-\.\·\s]{3,}", t) or re.fullmatch(r"(?:[_\-\.\·]{2,}\s*)+", t))
+    return bool(re.fullmatch(r"[_\-\.·\s]{3,}", t) or re.fullmatch(r"(?:[_\-\.·]{2,}\s*)+", t))
 
 
 def strip_line_leaders(text: Optional[str]) -> Optional[str]:
@@ -304,7 +341,7 @@ def normalize_field_value(value: Optional[str]) -> Optional[str]:
     lines = []
     for line in t.splitlines():
         s = clean_text(line)
-        if not s or is_page_artifact_line(s) or is_leader_only_line(s):
+        if not s or is_noise(s) or is_page_artifact_line(s) or is_leader_only_line(s):
             continue
         lines.append(s)
     out = "\n".join(lines).strip()
@@ -312,13 +349,17 @@ def normalize_field_value(value: Optional[str]) -> Optional[str]:
 
 
 def clean_result_text(text: Optional[str]) -> Optional[str]:
-    t = normalize_field_value(text)
+    if text is None:
+        return None
+    t = strip_line_leaders(text)
     if not t:
         return None
     lines = []
     for line in t.splitlines():
         s = clean_text(line)
-        if not s or is_page_artifact_line(s):
+        if not s or is_leader_only_line(s):
+            continue
+        if re.fullmatch(r"\d+\s*/\s*\d+\s*페이지", s) or re.fullmatch(r":\s*페이지", s):
             continue
         if s in {"원액", "최종원액", "시험", "정보", "재료", "완제의약품"}:
             continue
@@ -327,12 +368,22 @@ def clean_result_text(text: Optional[str]) -> Optional[str]:
     return out or None
 
 
-def strip_embedded_aux(value: str) -> str:
-    t = strip_line_leaders(value) or ""
+def clean_content_text(text: Optional[str]) -> Optional[str]:
+    if text is None:
+        return None
+    t = strip_line_leaders(text)
     if not t:
-        return ""
-    t = re.split(r"\s*(시험일자|시험기간|시험동물)\b", t)[0]
-    return clean_text(t)
+        return None
+    lines = []
+    for line in t.splitlines():
+        s = clean_text(line)
+        if not s or is_leader_only_line(s):
+            continue
+        if re.fullmatch(r"\d+\s*/\s*\d+\s*페이지", s):
+            continue
+        lines.append(s)
+    out = "\n".join(lines).strip()
+    return out or None
 
 
 def is_heading_forbidden_title(title: str) -> bool:
@@ -346,15 +397,56 @@ def detect_heading(line: str) -> Optional[Tuple[str, str, int]]:
     t = normalize_number_spacing(clean_text(line))
     if not t or is_noise(t):
         return None
+    if re.match(r"^\d+\s*(μg|ug|mg|g|kg|mL|ml|L|IU|CFU|PFU|%|ppm|ppb|℃|°C)\b", t):
+        return None
+    compact = re.sub(r"\s+", " ", t)
     for pat in CFG.heading_patterns:
-        m = pat.match(t)
+        m = pat.match(compact)
         if m:
             number = clean_text(m.group(1))
             title = clean_text(m.group(2))
-            if is_heading_forbidden_title(title):
+            if not title or title.startswith('.') or is_heading_forbidden_title(title):
                 continue
             return number, title, infer_depth(number)
     return None
+
+
+def next_label_fields(future_items) -> List[str]:
+    labels = []
+    for it in future_items[:4]:
+        if it.type == "kv":
+            f = canonical_field(it.meta.get("key", ""))
+            if f:
+                labels.append(f)
+        elif it.type == "line":
+            f = canonical_field(clean_text(it.text or ""))
+            if f:
+                labels.append(f)
+    return labels
+
+
+def is_labelled_block_starter(text: str, future_items=None) -> bool:
+    t = normalize_test_name(text)
+    if not t or canonical_field(t) or detect_heading(t) or is_noise(t):
+        return False
+    if is_probable_test_name(t):
+        return False
+    future_labels = set(next_label_fields(future_items or []))
+    return bool({"method", "criteria", "result"}.intersection(future_labels)) and len(t) <= 50
+
+
+def should_start_test(line: str, section_title: Optional[str], future_items=None) -> bool:
+    future_labels = set(next_label_fields(future_items or []))
+    in_test_section = bool(section_title and ("시험" in section_title or "품질시험결과" in section_title))
+    if is_labelled_block_starter(line, future_items):
+        return True
+    if is_probable_test_name(line):
+        if in_test_section:
+            return True
+        return bool({"method", "criteria", "result", "test_date", "test_period"}.intersection(future_labels))
+    if is_contextual_test_name(line, future_items):
+        return True
+    return False
 
 
 def normalize_test_name(text: str) -> str:
@@ -369,7 +461,7 @@ def normalize_test_name(text: str) -> str:
 
 def is_probable_test_name(text: str) -> bool:
     t = normalize_test_name(text)
-    if not t or len(t) > 120 or ":" in t or "：" in t or "|" in t or is_noise(t) or is_leader_only_line(t):
+    if not t or len(t) > 150 or ":" in t or "：" in t or "|" in t or is_noise(t) or is_leader_only_line(t):
         return False
     if any(p.match(t) for p in CFG.test_name_negative_patterns):
         return False
@@ -398,7 +490,7 @@ def is_contextual_test_name(text: str, future_items=None) -> bool:
     for it in future_items[:4]:
         if it.type == "kv":
             lookahead.append(normalize_label(it.meta.get("key", "")))
-        elif it.type in {"line", "table_line"}:
+        elif it.type == "line":
             line = clean_text(it.text or "")
             if canonical_field(line):
                 lookahead.append(normalize_label(line))
@@ -426,6 +518,15 @@ def repair_split_test_name(curr: str, nxt: Optional[str]) -> Tuple[str, bool]:
     return curr, False
 
 
+def render_table(table: List[List[str]]) -> str:
+    rows = []
+    for row in table:
+        cells = [clean_text(c) for c in row if clean_text(c)]
+        if cells:
+            rows.append(" | ".join(cells))
+    return "\n".join(rows).strip()
+
+
 def join_nonempty(parts: List[str], sep=" | ") -> str:
     return sep.join([clean_text(p) for p in parts if clean_text(p)])
 
@@ -434,24 +535,99 @@ class PDFReader:
     def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
 
+    def _word_in_table(self, word: Dict[str, Any], tables_with_bbox: List[Tuple[Tuple[float, float, float, float], List[List[str]]]]) -> bool:
+        x0 = float(word.get("x0", 0.0))
+        x1 = float(word.get("x1", 0.0))
+        top = float(word.get("top", 0.0))
+        bottom = float(word.get("bottom", top))
+        cx = (x0 + x1) / 2.0
+        cy = (top + bottom) / 2.0
+        for bbox, _table in tables_with_bbox:
+            bx0, btop, bx1, bbottom = bbox
+            if bx0 <= cx <= bx1 and btop <= cy <= bbottom:
+                return True
+        return False
+
+    def _group_words_to_lines(self, words: List[Dict[str, Any]]) -> List[Tuple[float, str]]:
+        if not words:
+            return []
+        words = sorted(words, key=lambda w: (round(float(w.get("top", 0.0)), 1), float(w.get("x0", 0.0))))
+        lines: List[List[Dict[str, Any]]] = []
+        current: List[Dict[str, Any]] = []
+        current_top: Optional[float] = None
+        for w in words:
+            top = float(w.get("top", 0.0))
+            if current_top is None or abs(top - current_top) <= 3.0:
+                current.append(w)
+                if current_top is None:
+                    current_top = top
+                else:
+                    current_top = min(current_top, top)
+            else:
+                lines.append(current)
+                current = [w]
+                current_top = top
+        if current:
+            lines.append(current)
+
+        out: List[Tuple[float, str]] = []
+        for line_words in lines:
+            line_words = sorted(line_words, key=lambda w: float(w.get("x0", 0.0)))
+            parts: List[str] = []
+            prev_x1: Optional[float] = None
+            for w in line_words:
+                txt = clean_text(w.get("text", ""))
+                if not txt:
+                    continue
+                x0 = float(w.get("x0", 0.0))
+                if parts and prev_x1 is not None and x0 - prev_x1 > 6.0:
+                    parts.append(" ")
+                parts.append(txt)
+                prev_x1 = float(w.get("x1", x0))
+            line_text = clean_text("".join(parts))
+            if line_text:
+                out.append((min(float(w.get("top", 0.0)) for w in line_words), line_text))
+        return out
+
     def read(self) -> List[RawPage]:
         pages = []
         with pdfplumber.open(self.pdf_path) as pdf:
             for i, page in enumerate(pdf.pages, start=1):
-                text = clean_text(page.extract_text() or "")
-                raw_tables = page.extract_tables() or []
-                tables = []
-                for table in raw_tables:
-                    norm_table = []
-                    for row in table or []:
+                tables_with_bbox: List[Tuple[Tuple[float, float, float, float], List[List[str]]]] = []
+                ordered_elements: List[OrderedElement] = []
+
+                for tbl in page.find_tables():
+                    raw = tbl.extract() or []
+                    norm_table: List[List[str]] = []
+                    for row in raw:
                         if row is None:
                             continue
                         norm_row = [clean_text(str(c)) if c is not None else "" for c in row]
                         if any(norm_row):
                             norm_table.append(norm_row)
-                    if norm_table:
-                        tables.append(norm_table)
-                pages.append(RawPage(i, text, tables))
+                    if not norm_table:
+                        continue
+                    bbox = tuple(float(x) for x in tbl.bbox)
+                    tables_with_bbox.append((bbox, norm_table))
+                    table_lines = []
+                    for row in norm_table:
+                        row_txt = join_nonempty(row, sep=" | ")
+                        if row_txt:
+                            table_lines.append(row_txt)
+                    table_text = "\n".join(table_lines).strip()
+                    if table_text:
+                        ordered_elements.append(OrderedElement("table", table_text, bbox[1], {"bbox": bbox, "table": norm_table}))
+
+                words = page.extract_words(x_tolerance=2, y_tolerance=3, keep_blank_chars=False, use_text_flow=False) or []
+                text_words = [w for w in words if not self._word_in_table(w, tables_with_bbox)]
+                line_pairs = self._group_words_to_lines(text_words)
+                for top, line in line_pairs:
+                    ordered_elements.append(OrderedElement("text", line, top, {}))
+
+                ordered_elements.sort(key=lambda e: (e.top, 0 if e.kind == "text" else 1))
+                page_text = "\n".join(e.text for e in ordered_elements if e.kind == "text")
+                page_tables = [tbl for _bbox, tbl in tables_with_bbox]
+                pages.append(RawPage(i, clean_text(page_text), page_tables, ordered_elements))
         return pages
 
 
@@ -462,9 +638,33 @@ class Normalizer:
     def run(self, pages: List[RawPage]) -> List[Item]:
         items = []
         for page in pages:
-            items.extend(self._normalize_text(page.text, page.page_num))
-            items.extend(self._normalize_tables(page.tables, page.page_num))
+            items.extend(self._normalize_page(page))
         return items
+
+    def _normalize_page(self, page: RawPage):
+        out = []
+        if page.ordered_elements:
+            pending_text_lines: List[str] = []
+            def flush_text_lines():
+                nonlocal out, pending_text_lines
+                if not pending_text_lines:
+                    return
+                joined = "\n".join(pending_text_lines)
+                out.extend(self._normalize_text(joined, page.page_num))
+                pending_text_lines = []
+            for elem in page.ordered_elements:
+                if elem.kind == "text":
+                    pending_text_lines.append(elem.text)
+                elif elem.kind == "table":
+                    flush_text_lines()
+                    table_text = clean_text(elem.text)
+                    if table_text:
+                        out.append(self._make_item("table_block", page.page_num, table_text, {"source": "table", **elem.meta}))
+            flush_text_lines()
+            return out
+        out.extend(self._normalize_text(page.text, page.page_num))
+        out.extend(self._normalize_tables(page.tables, page.page_num))
+        return out
 
     def _next_idx(self) -> int:
         x = self._idx
@@ -517,7 +717,7 @@ class Normalizer:
                 return None
             if key and value:
                 return key, value
-        labels = CFG.test_name_labels + CFG.criteria_labels + CFG.result_labels + CFG.method_labels + CFG.remarks_labels
+        labels = CFG.test_name_labels + CFG.criteria_labels + CFG.result_labels + CFG.method_labels + CFG.date_labels + CFG.period_labels + CFG.remarks_labels
         normalized_line = clean_text(line)
         for label in sorted(set(labels), key=len, reverse=True):
             if normalized_line.startswith(label + " "):
@@ -528,45 +728,12 @@ class Normalizer:
                     return normalize_label(label), value
         return None
 
-    def _detect_table_header(self, table):
-        for i in range(min(3, len(table))):
-            row = [normalize_label(c) for c in table[i]]
-            header_map = {}
-            for col_idx, cell in enumerate(row):
-                field_name = canonical_field(cell)
-                if field_name:
-                    header_map[col_idx] = field_name
-            if len(header_map) >= 2:
-                return i, header_map
-        return None, {}
-
     def _normalize_tables(self, tables, page_num):
         out = []
         for table_idx, table in enumerate(tables):
-            header_row_idx, header_map = self._detect_table_header(table)
-            if header_row_idx is not None:
-                header_cells = [clean_text(c) for c in table[header_row_idx]]
-                out.append(self._make_item("table_header", page_num, join_nonempty(header_cells), {"header_map": header_map, "raw_row": header_cells, "table_idx": table_idx, "row_idx": header_row_idx}))
-                for row_idx, row in enumerate(table[header_row_idx + 1:], start=header_row_idx + 1):
-                    cells = [clean_text(c) for c in row]
-                    cells = [c for c in cells if c and not is_noise(c)]
-                    if not cells:
-                        continue
-                    fields = {}
-                    for col_idx, field_name in header_map.items():
-                        if col_idx < len(row):
-                            value = clean_text(row[col_idx])
-                            if value and not is_noise(value):
-                                fields[field_name] = value
-                    if fields:
-                        out.append(self._make_item("table_row", page_num, meta={"fields": fields, "raw_row": cells, "table_idx": table_idx, "row_idx": row_idx}))
-                continue
-            for row in table:
-                cells = [clean_text(c) for c in row]
-                cells = [c for c in cells if c and not is_noise(c)]
-                if not cells:
-                    continue
-                out.append(self._make_item("table_line", page_num, join_nonempty(cells), {"source": "table"}))
+            table_text = render_table(table)
+            if table_text:
+                out.append(self._make_item("table_block", page_num, table_text, {"table_idx": table_idx}))
         return out
 
 
@@ -607,19 +774,64 @@ class BlockBuilder:
         return blocks
 
 
-class Accumulator:
+class GenericAccumulator:
     def __init__(self, section_number, section_title, page):
         self.section_number = section_number
         self.section_title = section_title
         self.page_start = page
         self.page_end = page
-        self.test_name = None
-        self.criteria = []
-        self.result = []
-        self.method = []
-        self.remarks = []
-        self.raw = []
+        self.lines: List[str] = []
         self.source_types = set()
+
+    def add(self, text: str, item_type: str, page: int):
+        t = clean_text(text)
+        if not t or is_noise(t):
+            return
+        self.page_end = page
+        self.lines.append(t)
+        self.source_types.add(item_type)
+
+    def has_payload(self) -> bool:
+        return bool(clean_content_text("\n".join(self.lines)))
+
+    def to_record(self) -> Record:
+        raw = "\n".join(self.lines).strip()
+        return Record(
+            record_type="content",
+            section_number=self.section_number,
+            section_title=self.section_title,
+            test_name=None,
+            content_label=self.section_title,
+            content=clean_content_text(raw),
+            criteria=None,
+            result=None,
+            method=None,
+            test_date=None,
+            test_period=None,
+            remarks=None,
+            page_start=self.page_start,
+            page_end=self.page_end,
+            source_types=sorted(self.source_types),
+            raw_text=raw,
+        )
+
+
+class TestAccumulator:
+    def __init__(self, section_number, section_title, page):
+        self.section_number = section_number
+        self.section_title = section_title
+        self.page_start = page
+        self.page_end = page
+        self.test_name: Optional[str] = None
+        self.criteria: List[str] = []
+        self.result: List[str] = []
+        self.method: List[str] = []
+        self.test_date: List[str] = []
+        self.test_period: List[str] = []
+        self.remarks: List[str] = []
+        self.raw: List[str] = []
+        self.source_types = set()
+        self.result_tables: List[str] = []
 
     def set_page(self, page):
         self.page_end = page
@@ -629,11 +841,23 @@ class Accumulator:
         if t and not is_noise(t) and t not in {":", "："}:
             self.raw.append(t)
 
+    def add_table(self, text: str, page: int):
+        t = clean_content_text(text)
+        if not t:
+            return
+        self.page_end = page
+        self.result_tables.append(t)
+        self.raw.append(t)
+        self.source_types.add("table_block")
+
     def add_field(self, field_name, value):
         v = clean_text(value)
         if not v or is_noise(v) or v in {":", "："}:
             return
-        v = normalize_field_value(v) or v
+        if field_name == "result":
+            v = clean_result_text(v) or v
+        else:
+            v = normalize_field_value(v) or v
         if field_name == "test_name":
             normalized = normalize_test_name(v)
             if normalized and not self.test_name:
@@ -644,20 +868,39 @@ class Accumulator:
             self.result.append(v)
         elif field_name == "method" and v not in self.method:
             self.method.append(v)
+        elif field_name == "test_date" and v not in self.test_date:
+            self.test_date.append(v)
+        elif field_name == "test_period" and v not in self.test_period:
+            self.test_period.append(v)
         elif field_name == "remarks" and v not in self.remarks:
             self.remarks.append(v)
 
     def has_payload(self):
-        return bool(self.test_name or self.criteria or self.result or self.method or self.remarks)
+        return bool(self.test_name or self.criteria or self.result or self.method or self.test_date or self.test_period or self.remarks or self.result_tables)
 
     def to_record(self):
+        result_parts = []
+        if self.result:
+            result_parts.extend(self.result)
+        if self.result_tables:
+            result_parts.extend(self.result_tables)
         return Record(
-            self.section_number, self.section_title, self.test_name,
-            "\n".join(self.criteria) if self.criteria else None,
-            "\n".join(self.result) if self.result else None,
-            "\n".join(self.method) if self.method else None,
-            "\n".join(self.remarks) if self.remarks else None,
-            self.page_start, self.page_end, sorted(self.source_types), "\n".join(self.raw).strip()
+            record_type="test",
+            section_number=self.section_number,
+            section_title=self.section_title,
+            test_name=self.test_name,
+            content_label=None,
+            content=None,
+            criteria="\n".join(self.criteria) if self.criteria else None,
+            result="\n".join(result_parts) if result_parts else None,
+            method="\n".join(self.method) if self.method else None,
+            test_date="\n".join(self.test_date) if self.test_date else None,
+            test_period="\n".join(self.test_period) if self.test_period else None,
+            remarks="\n".join(self.remarks) if self.remarks else None,
+            page_start=self.page_start,
+            page_end=self.page_end,
+            source_types=sorted(self.source_types),
+            raw_text="\n".join(self.raw).strip(),
         )
 
 
@@ -668,44 +911,62 @@ class RecordExtractor:
             records.extend(self._extract_block(block))
         return self._postprocess(records)
 
+    def _flush_generic(self, generic: GenericAccumulator, out: List[Record]):
+        if generic and generic.has_payload():
+            out.append(generic.to_record())
+
+    def _flush_test(self, current: Optional[TestAccumulator], out: List[Record]):
+        if current and current.has_payload():
+            out.append(current.to_record())
+
+    def _make_heading_record(self, block: Block) -> Optional[Record]:
+        if not block.section_number and not block.section_title:
+            return None
+        title = join_nonempty([block.section_number, block.section_title], sep=" ")
+        return Record(
+            record_type="heading",
+            section_number=block.section_number,
+            section_title=block.section_title,
+            test_name=None,
+            content_label=block.section_title,
+            content=title,
+            criteria=None,
+            result=None,
+            method=None,
+            test_date=None,
+            test_period=None,
+            remarks=None,
+            page_start=block.page_start,
+            page_end=block.page_start,
+            source_types=["heading"],
+            raw_text=title,
+        )
+
+    def _looks_like_labelled_test_block(self, text: str) -> bool:
+        t = clean_text(text)
+        return bool(t and not canonical_field(t) and not detect_heading(t) and re.search(r"(시험방법|시험기준|시험결과|시험일자|시험기간)", t))
+
     def _extract_block(self, block):
-        out = []
-        current = Accumulator(block.section_number, block.section_title, block.page_start)
-        pending_label = None
-        local_table_parent_name = None
-        local_table_parent_method = None
-        local_table_parent_section_number = None
-        local_table_parent_section_title = None
+        out: List[Record] = []
+        heading_record = self._make_heading_record(block)
+        if heading_record is not None:
+            out.append(heading_record)
+        current_test: Optional[TestAccumulator] = None
+        current_generic = GenericAccumulator(block.section_number, block.section_title, block.page_start)
+        pending_label: Optional[str] = None
 
-        for pos, item in enumerate(block.items):
-            future_items = block.items[pos + 1: pos + 5]
-
-            if item.type == "table_header":
-                header_map = item.meta.get("header_map", {})
-                has_test = any(v == "test_name" for v in header_map.values())
-                has_criteria = any(v == "criteria" for v in header_map.values())
-                has_result = any(v == "result" for v in header_map.values())
-                if has_test and has_criteria and has_result and current.test_name:
-                    local_table_parent_name = current.test_name
-                    local_table_parent_method = current.method[-1] if current.method else None
-                    local_table_parent_section_number = current.section_number
-                    local_table_parent_section_title = current.section_title
-                continue
-
-            if item.type == "table_row":
-                rec = self._record_from_table_row(
-                    item,
-                    block,
-                    local_table_parent_name,
-                    local_table_parent_method,
-                    local_table_parent_section_number,
-                    local_table_parent_section_title,
-                )
-                if rec:
-                    out.append(rec)
-                continue
+        items = block.items
+        for pos, item in enumerate(items):
+            future_items = items[pos + 1: pos + 5]
 
             if item.type == "heading":
+                continue
+
+            if item.type == "table_block":
+                if current_test is not None:
+                    current_test.add_table(item.text or "", item.page)
+                else:
+                    current_generic.add(item.text or "", item.type, item.page)
                 continue
 
             if item.type == "kv":
@@ -715,117 +976,83 @@ class RecordExtractor:
                 pending_label = None
 
                 if field_name == "test_name" and is_probable_test_name(value):
-                    if current.test_name or current.has_payload():
-                        out.append(current.to_record())
-                    current = Accumulator(block.section_number, block.section_title, item.page)
-                    current.add_field("test_name", value)
-                    current.source_types.add("kv_test_name")
-                    current.add_raw(f"{key}: {value}")
+                    self._flush_generic(current_generic, out)
+                    current_generic = GenericAccumulator(block.section_number, block.section_title, item.page)
+                    self._flush_test(current_test, out)
+                    current_test = TestAccumulator(block.section_number, block.section_title, item.page)
+                    current_test.add_field("test_name", value)
+                    current_test.source_types.add("kv_test_name")
+                    current_test.add_raw(f"{key}: {value}")
                     continue
 
-                current.set_page(item.page)
-                current.source_types.add("kv")
-                current.add_raw(f"{key}: {value}")
+                if current_test is None:
+                    current_generic.add(f"{key}: {value}", "kv", item.page)
+                    continue
 
-                if field_name == "criteria":
-                    value = strip_embedded_aux(value)
-                elif field_name == "method":
-                    value = strip_embedded_aux(value)
-                elif field_name == "result":
-                    value = normalize_field_value(value) or value
+                current_test.set_page(item.page)
+                current_test.source_types.add("kv")
+                current_test.add_raw(f"{key}: {value}")
 
-                if field_name in {"criteria", "result", "method", "remarks"}:
-                    current.add_field(field_name, value)
+                if field_name in {"criteria", "result", "method", "test_date", "test_period", "remarks"}:
+                    current_test.add_field(field_name, value)
                     pending_label = field_name
                 continue
 
-            if item.type in {"line", "table_line"}:
+            if item.type == "line":
                 line = clean_text(item.text or "")
                 if not line or is_noise(line) or line in {":", "："} or is_page_artifact_line(line) or is_leader_only_line(line):
                     continue
 
-                if pending_label and not canonical_field(line) and not detect_heading(line) and not is_page_artifact_line(line) and not is_leader_only_line(line) and not (pending_label != "method" and is_probable_test_name(line)) and not (pending_label != "method" and is_contextual_test_name(line, future_items)):
-                    current.set_page(item.page)
-                    current.source_types.add("label_promoted_value")
-                    current.add_raw(line)
-                    promoted = strip_embedded_aux(line) if pending_label in {"criteria", "method"} else normalize_field_value(line)
-                    if promoted:
-                        current.add_field(pending_label, promoted)
+                if current_test is not None and pending_label and not canonical_field(line) and not detect_heading(line) and not is_page_artifact_line(line) and not is_leader_only_line(line) and not (pending_label not in {"method", "test_date", "test_period"} and is_probable_test_name(line)) and not (pending_label not in {"method", "test_date", "test_period"} and is_contextual_test_name(line, future_items)):
+                    current_test.set_page(item.page)
+                    current_test.source_types.add("label_promoted_value")
+                    current_test.add_raw(line)
+                    current_test.add_field(pending_label, line)
                     pending_label = None
                     continue
                 pending_label = None
 
                 field_name = canonical_field(line)
-                if field_name in {"criteria", "result", "method", "remarks"}:
-                    current.set_page(item.page)
-                    current.source_types.add("label_promoted_value")
-                    current.add_raw(line)
+                if current_test is not None and field_name in {"criteria", "result", "method", "test_date", "test_period", "remarks"}:
+                    current_test.set_page(item.page)
+                    current_test.source_types.add("label_promoted_value")
+                    current_test.add_raw(line)
                     pending_label = field_name
                     continue
 
                 inline = self._parse_inline_field(line)
-                if inline and inline[0] == "test_name" and is_probable_test_name(inline[1]):
-                    if current.test_name or current.has_payload():
-                        out.append(current.to_record())
-                    current = Accumulator(block.section_number, block.section_title, item.page)
-                    current.add_field("test_name", inline[1])
-                    current.source_types.add("line_test_name")
-                    current.add_raw(line)
+                if inline and inline[0] == "test_name" and should_start_test(inline[1], block.section_title, future_items):
+                    self._flush_generic(current_generic, out)
+                    current_generic = GenericAccumulator(block.section_number, block.section_title, item.page)
+                    self._flush_test(current_test, out)
+                    current_test = TestAccumulator(block.section_number, block.section_title, item.page)
+                    current_test.add_field("test_name", inline[1])
+                    current_test.source_types.add("line_test_name")
+                    current_test.add_raw(line)
                     continue
 
-                if block.section_number == "7.4" and line == "이온교환크로마토그래피":
-                    if current.test_name or current.has_payload():
-                        out.append(current.to_record())
-                    current = Accumulator(block.section_number, block.section_title, item.page)
-                    current.add_field("test_name", "이온교환크로마토그래피시험")
-                    current.source_types.add("line_test_name")
-                    current.add_raw(line)
+                if should_start_test(line, block.section_title, future_items):
+                    self._flush_generic(current_generic, out)
+                    current_generic = GenericAccumulator(block.section_number, block.section_title, item.page)
+                    self._flush_test(current_test, out)
+                    current_test = TestAccumulator(block.section_number, block.section_title, item.page)
+                    current_test.add_field("test_name", line)
+                    current_test.source_types.add("line_test_name")
+                    current_test.add_raw(line)
                     continue
 
-                if is_probable_test_name(line) or is_contextual_test_name(line, future_items):
-                    if current.test_name or current.has_payload():
-                        out.append(current.to_record())
-                    current = Accumulator(block.section_number, block.section_title, item.page)
-                    current.add_field("test_name", line if line != "이온교환크로마토그래피" else "이온교환크로마토그래피시험")
-                    current.source_types.add("line_test_name")
-                    current.add_raw(line)
-                    continue
+                if current_test is not None:
+                    current_test.set_page(item.page)
+                    current_test.source_types.add("line")
+                    current_test.add_raw(line)
+                    if inline and inline[0] in {"criteria", "result", "method", "test_date", "test_period", "remarks"}:
+                        current_test.add_field(inline[0], inline[1])
+                else:
+                    current_generic.add(line, "line", item.page)
 
-                current.set_page(item.page)
-                current.source_types.add(item.type)
-                current.add_raw(line)
-
-                if inline and inline[0] in {"criteria", "result", "method", "remarks"}:
-                    val = strip_embedded_aux(inline[1]) if inline[0] in {"criteria", "method"} else normalize_field_value(inline[1])
-                    if val:
-                        current.add_field(inline[0], val)
-                    continue
-
-        if current.test_name or current.has_payload():
-            out.append(current.to_record())
+        self._flush_generic(current_generic, out)
+        self._flush_test(current_test, out)
         return out
-
-    def _record_from_table_row(self, item, block, parent_test_name=None, parent_method=None, parent_section_number=None, parent_section_title=None):
-        fields = item.meta.get("fields", {})
-        raw_row = item.meta.get("raw_row", [])
-        row_test_name = normalize_test_name(clean_text(fields.get("test_name", "")))
-        criteria = normalize_field_value(fields.get("criteria"))
-        result = clean_result_text(fields.get("result"))
-        method = normalize_field_value(fields.get("method"))
-        remarks = normalize_field_value(fields.get("remarks"))
-
-        if row_test_name and is_probable_test_name(row_test_name):
-            return Record(block.section_number, block.section_title, row_test_name, criteria, result, method, remarks, item.page, item.page, ["table_row"], join_nonempty(raw_row))
-
-        if parent_test_name and row_test_name and (criteria or result):
-            return Record(
-                parent_section_number or block.section_number,
-                parent_section_title or block.section_title,
-                f"{parent_test_name} - {row_test_name}",
-                criteria, result, parent_method, remarks,
-                item.page, item.page, ["table_row_parented"], join_nonempty(raw_row)
-            )
-        return None
 
     def _parse_inline_field(self, line):
         m = re.match(r"^\s*([^:：]{1,40})\s*[:：]\s*(.+?)\s*$", line)
@@ -833,7 +1060,7 @@ class RecordExtractor:
             field_name = canonical_field(m.group(1))
             if field_name:
                 return field_name, clean_text(m.group(2))
-        labels = CFG.test_name_labels + CFG.criteria_labels + CFG.result_labels + CFG.method_labels + CFG.remarks_labels
+        labels = CFG.test_name_labels + CFG.criteria_labels + CFG.result_labels + CFG.method_labels + CFG.date_labels + CFG.period_labels + CFG.remarks_labels
         for label in sorted(set(labels), key=len, reverse=True):
             if line.startswith(label + " "):
                 value = clean_text(line[len(label):])
@@ -842,148 +1069,30 @@ class RecordExtractor:
                     return field_name, value
         return None
 
-    def _parse_73_rows_from_raw(self, rec: Record) -> List[Record]:
-        if rec.section_number != "7.3":
-            return []
-        if rec.test_name != "표기반결과검증시험":
-            return []
-        raw = clean_text(rec.raw_text or "")
-        if "주성분함량" not in raw and "보조지표" not in raw:
-            return []
-
-        new_records = []
-        patterns = [
-            ("주성분함량", r"주성분함량\s+([0-9.]+%\s*이하)\s+([0-9.]+%)"),
-            ("보조지표", r"보조지표\s+([0-9.]+\s*이하)\s+([0-9.]+)"),
-        ]
-        for label, pat in patterns:
-            m = re.search(pat, raw)
-            if not m:
-                continue
-            criteria = clean_text(m.group(1))
-            result = clean_text(m.group(2))
-            new_records.append(
-                Record(
-                    section_number=rec.section_number,
-                    section_title=rec.section_title,
-                    test_name=f"{rec.test_name} - {label}",
-                    criteria=criteria,
-                    result=result,
-                    method=rec.method,
-                    remarks=None,
-                    page_start=rec.page_start,
-                    page_end=rec.page_end,
-                    source_types=["postprocess_7_3_raw_parse"],
-                    raw_text=f"{label} | {criteria} | {result}",
-                )
-            )
-        return new_records
-
-    def _record_is_empty(self, rec: Record) -> bool:
-        return not (rec.criteria or rec.result or rec.method or rec.remarks)
-
-    def _section_sort_key(self, s: Optional[str]) -> Tuple:
-        if not s:
-            return (9999,)
-        try:
-            return tuple(int(x) for x in s.split("."))
-        except Exception:
-            return (9999, s)
-
-    def _postprocess(self, records):
-        cleaned = []
+    def _postprocess(self, records: List[Record]) -> List[Record]:
+        cleaned: List[Record] = []
         for rec in records:
-            rec.test_name = normalize_test_name(rec.test_name or "")
-            if not rec.test_name:
-                continue
-            if not (is_probable_test_name(rec.test_name) or " - " in rec.test_name):
-                continue
-            rec.criteria = normalize_field_value(rec.criteria) if rec.criteria else None
-            rec.result = clean_result_text(rec.result)
-            rec.method = normalize_field_value(rec.method) if rec.method else None
-            rec.remarks = normalize_field_value(rec.remarks) if rec.remarks else None
-            rec.raw_text = clean_text(rec.raw_text)
-            if rec.criteria:
-                rec.criteria = strip_embedded_aux(rec.criteria)
-            if rec.method:
-                rec.method = strip_embedded_aux(rec.method)
-            if (not rec.result) and rec.raw_text:
-                m = re.search(r"시험결과:\s*(.+)$", rec.raw_text, re.M)
-                if m:
-                    cand = clean_result_text(m.group(1))
-                    if cand:
-                        rec.result = cand
+            rec.raw_text = clean_content_text(rec.raw_text) or ""
+            if rec.record_type == "heading":
+                rec.content = clean_content_text(rec.content) if rec.content else None
+                if not rec.content:
+                    continue
+            elif rec.record_type == "test":
+                rec.test_name = normalize_test_name(rec.test_name or "")
+                if not rec.test_name:
+                    continue
+                rec.criteria = normalize_field_value(rec.criteria) if rec.criteria else None
+                rec.result = clean_result_text(rec.result) if rec.result else None
+                rec.method = normalize_field_value(rec.method) if rec.method else None
+                rec.test_date = normalize_field_value(rec.test_date) if rec.test_date else None
+                rec.test_period = normalize_field_value(rec.test_period) if rec.test_period else None
+                rec.remarks = normalize_field_value(rec.remarks) if rec.remarks else None
+            else:
+                rec.content = clean_content_text(rec.content) if rec.content else None
+                if not rec.content:
+                    continue
             cleaned.append(rec)
-
-        derived = []
-        for rec in cleaned:
-            derived.extend(self._parse_73_rows_from_raw(rec))
-
-        has_73_children = any(
-            r.section_number == "7.3" and (r.test_name or "").startswith("표기반결과검증시험 - ")
-            for r in derived
-        )
-
-        cleaned2 = []
-        for rec in cleaned:
-            if rec.section_number == "7.3" and rec.test_name == "표기반결과검증시험" and has_73_children:
-                continue
-            cleaned2.append(rec)
-
-        filtered = []
-        has_full_subtitle = any(
-            r.section_number == "7.4" and r.test_name == "소제목추가 검증시험" and not self._record_is_empty(r)
-            for r in cleaned2
-        )
-        for rec in cleaned2:
-            if rec.section_number == "7.4" and rec.test_name in {
-                "소제목추가 검증시험 - 주성분함량",
-                "소제목추가 검증시험 - 보조지표",
-            }:
-                continue
-            if rec.section_number == "7.4" and rec.test_name == "소제목추가 검증시험" and self._record_is_empty(rec) and has_full_subtitle:
-                continue
-            filtered.append(rec)
-
-        has_ion = any(r.section_number == "7.4" and r.test_name == "이온교환크로마토그래피시험" for r in filtered)
-        if not has_ion:
-            filtered.append(
-                Record(
-                    section_number="7.4",
-                    section_title="결과 칸 밀림",
-                    test_name="이온교환크로마토그래피시험",
-                    criteria="5.0mm이상저하지름",
-                    result="12.0mm",
-                    method=None,
-                    remarks=None,
-                    page_start=19,
-                    page_end=19,
-                    source_types=["postprocess_7_4_restore"],
-                    raw_text="이온교환크로마토그래피\n시험기준: 5.0mm이상저하지름\n시험결과: 12.0mm",
-                )
-            )
-
-        filtered.extend(derived)
-
-        def record_key(r: Record):
-            sec = self._section_sort_key(r.section_number)
-            intra = 50
-            if r.section_number == "7.3":
-                if r.test_name == "표기반결과검증시험 - 주성분함량":
-                    intra = 0
-                elif r.test_name == "표기반결과검증시험 - 보조지표":
-                    intra = 1
-                elif r.test_name == "표기반결과검증시험":
-                    intra = 99
-            elif r.section_number == "7.4":
-                if r.test_name == "이온교환크로마토그래피시험":
-                    intra = 0
-                elif r.test_name == "소제목추가 검증시험":
-                    intra = 1
-            return (r.page_start, sec, intra, r.test_name or "")
-
-        filtered.sort(key=record_key)
-        return filtered
+        return cleaned
 
 
 class Pipeline:
@@ -1027,7 +1136,7 @@ class Pipeline:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PDF test extractor")
+    parser = argparse.ArgumentParser(description="PDF content and test extractor")
     parser.add_argument("--pdf", required=True)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()

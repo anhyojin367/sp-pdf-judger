@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from .config import FAIL_LABEL, PASS_LABEL, STATUS_COLORS
 from .schemas import ProcessingResult, Summary, TreeNode
 from .utils import html_escape
@@ -22,52 +24,121 @@ def render_summary_card(summary: Summary) -> str:
     """
 
 
-def _status_dot(status: str | None, show: bool = True) -> str:
-    if not show:
+def _normalize_display_value(value: str | None) -> str:
+    if not value:
         return ""
+    value = value.replace("\\r\\n", "\n").replace("\\n", "\n")
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    return value.strip()
 
+
+def _format_criteria_display(value: str | None) -> str | None:
+    text = _normalize_display_value(value)
+    if not text:
+        return None
+
+    compact = re.sub(r"\s+", " ", text).strip()
+    compact = compact.replace("（", "(").replace("）", ")")
+    compact = re.sub(r"기준\s*\(([^)]+)\)\s*(이상|이하|미만|초과)", r"\1 \2", compact)
+    compact = re.sub(r"^(이상|이하|미만|초과)\s+(.+)$", r"\2 \1", compact)
+    compact = re.sub(r"\(([0-9]+(?:\.[0-9]+)?)\)\s*(이상|이하|미만|초과)", r"\1 \2", compact)
+    return compact
+
+
+def _status_light(status: str | None) -> str:
     if status == PASS_LABEL:
         color = STATUS_COLORS[PASS_LABEL]
     elif status == FAIL_LABEL:
         color = STATUS_COLORS[FAIL_LABEL]
     else:
-        color = "#9ca3af"
+        color = "#d1d5db"
 
-    return f'<span style="width:12px;height:12px;border-radius:50%;display:inline-block;background:{color};margin-right:10px;flex:0 0 auto;"></span>'
+    return f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};"></span>'
 
 
-def _kv_line(label: str, value: str | None) -> str:
-    if not value:
+def _kv_line(label: str, value: str | None, status: str | None = None) -> str:
+    display_value = _format_criteria_display(value) if label == "시험기준" else _normalize_display_value(value)
+    if not display_value:
         return ""
+
+    status_html = _status_light(status) if status else ""
+    grid_cols = "126px 1fr 24px" if status_html else "126px 1fr"
+
     return f"""
-    <div style="display:flex;align-items:flex-end;gap:16px;margin-top:12px;">
-      <div style="min-width:110px;font-weight:800;color:#111827;white-space:nowrap;">
-        {html_escape(label)}
-      </div>
-      <div style="flex:1;border-bottom:1px solid #9ca3af;padding:0 4px 6px 4px;color:#111827;white-space:pre-wrap;line-height:1.6;">
-        {html_escape(value)}
+    <div style="display:grid;grid-template-columns:{grid_cols};column-gap:12px;align-items:end;margin-top:8px;">
+      <div style="font-weight:800;color:#111827;line-height:1.15;">{html_escape(label)}</div>
+      <div style="color:#111827;white-space:pre-wrap;line-height:1.55;padding:0 1px 6px 1px;border-bottom:1px solid #9ca3af;">{html_escape(display_value)}</div>
+      {f'<div style="display:flex;align-items:center;justify-content:flex-end;padding-bottom:6px;">{status_html}</div>' if status_html else ''}
+    </div>
+    """
+
+
+def _render_lot_table(ev) -> str:
+    rows = getattr(ev, "lot_judgements", None) or []
+    if not rows:
+        return ""
+
+    header = "".join([
+        '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:left;background:#f8fafc;">로트번호</th>',
+        '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:left;background:#f8fafc;">시험기간</th>',
+        '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:left;background:#f8fafc;">시험결과</th>',
+        '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:center;background:#f8fafc;">판정</th>',
+    ])
+
+    body_rows = []
+    for row in rows:
+        body_rows.append(
+            "<tr>"
+            f'<td style="border:1px solid #dbe3ea;padding:8px 10px;">{html_escape(row.get("lot_no", ""))}</td>'
+            f'<td style="border:1px solid #dbe3ea;padding:8px 10px;">{html_escape(row.get("test_date", ""))}</td>'
+            f'<td style="border:1px solid #dbe3ea;padding:8px 10px;">{html_escape(row.get("result", ""))}</td>'
+            f'<td style="border:1px solid #dbe3ea;padding:8px 10px;text-align:center;">{_status_light(row.get("status"))}</td>'
+            "</tr>"
+        )
+
+    return f"""
+    <div style="display:grid;grid-template-columns:126px 1fr;column-gap:12px;align-items:start;margin-top:8px;">
+      <div style="font-weight:800;color:#111827;line-height:1.15;padding-top:8px;">시험결과</div>
+      <div style="padding:0 0 6px 0;border-bottom:1px solid #9ca3af;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;background:#ffffff;">
+          <thead><tr>{header}</tr></thead>
+          <tbody>{''.join(body_rows)}</tbody>
+        </table>
       </div>
     </div>
     """
 
 
-def _render_normalized_block(node: TreeNode) -> str:
-    ev = node.evaluation
-    if ev is None:
+def _render_reason_box(ev) -> str:
+    if not getattr(ev, "comparison_completed", False):
         return ""
 
-    lines: list[str] = []
-    if ev.normalized_criteria:
-        lines.append(f'<div style="margin-top:4px;">정규화 시험기준: {html_escape(ev.normalized_criteria)}</div>')
-    if ev.normalized_result:
-        lines.append(f'<div style="margin-top:4px;">정규화 시험결과: {html_escape(ev.normalized_result)}</div>')
+    rows = getattr(ev, "lot_judgements", None) or []
+    if rows:
+        reason_html = "".join(
+            f'<div style="margin-top:6px;"><b>{html_escape(row.get("lot_no", ""))}</b>: {html_escape(row.get("reason", ""))}</div>'
+            for row in rows
+            if row.get("lot_no") and row.get("reason")
+        )
+    else:
+        if not getattr(ev, "reason", ""):
+            return ""
+        reason_html = html_escape(ev.reason)
 
-    if not lines:
-        return ""
+    normalized = ""
+    if ev.normalized_criteria or ev.normalized_result:
+        normalized = f"""
+        <div style="margin-top:8px;color:#4b5563;line-height:1.55;font-size:14px;">
+          {f'<div>정규화 시험기준: {html_escape(ev.normalized_criteria)}</div>' if ev.normalized_criteria else ''}
+          {f'<div>정규화 시험결과: {html_escape(ev.normalized_result)}</div>' if ev.normalized_result else ''}
+        </div>
+        """
 
     return f"""
-    <div style="margin-top:12px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;color:#4b5563;line-height:1.65;font-size:14px;">
-      {''.join(lines)}
+    <div style="margin-top:16px;padding:14px 16px;border-radius:14px;background:linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);border:1px solid #dbe3ea;border-left:5px solid #111827;">
+      <div style="font-weight:800;color:#111827;margin-bottom:6px;">판정 이유</div>
+      <div style="color:#111827;line-height:1.75;">{reason_html}</div>
+      {normalized}
     </div>
     """
 
@@ -77,31 +148,56 @@ def _render_test_leaf(node: TreeNode, depth_px: int) -> str:
     if ev is None:
         return ""
 
-    body = f"""
-    <div style="padding:10px 2px 8px 6px;">
-      {_kv_line("시험기준", ev.criteria)}
-      {_kv_line("시험결과", ev.result)}
-      <div style="margin-top:14px;color:#111827;line-height:1.75;">
-        <span style="font-weight:800;">판정 이유</span>
-        <span style="margin-left:10px;">{html_escape(ev.reason)}</span>
+    result_block = (
+        _render_lot_table(ev)
+        if getattr(ev, "lot_judgements", None)
+        else _kv_line(
+            "시험결과",
+            getattr(ev, "result", None),
+            status=getattr(ev, "final_status", None) if getattr(ev, "comparison_completed", False) else None,
+        )
+    )
+
+    body = "".join([
+        _kv_line("시험방법", getattr(ev, "method", None)),
+        _kv_line("시험기준", getattr(ev, "criteria", None)),
+        _kv_line("시험일자", getattr(ev, "test_date", None)),
+        _kv_line("시험기간", getattr(ev, "test_period", None)),
+        result_block,
+        _render_reason_box(ev),
+        _kv_line("비고", getattr(ev, "remarks", None)),
+    ])
+
+    return f"""
+    <div style="margin-left:{depth_px}px;border:1px solid #e5e7eb;border-radius:14px;background:#ffffff;margin-top:10px;overflow:hidden;">
+      <div style="padding:14px 16px 8px 16px;font-size:17px;font-weight:800;color:#111827;">
+        <span>{html_escape(node.title)}</span>
       </div>
-      {_render_normalized_block(node)}
+      <div style="padding:4px 16px 16px 16px;">{body}</div>
     </div>
     """
 
+
+def _render_content_leaf(node: TreeNode, depth_px: int) -> str:
+    content = "\n\n".join([x for x in node.info_lines if _normalize_display_value(x)])
+    if not content:
+        return ""
+
     return f"""
-    <details style="margin-left:{depth_px}px;border:1px solid #e5e7eb;border-radius:12px;padding:10px 14px;background:#fff;margin-top:10px;">
-      <summary style="list-style:none;cursor:pointer;font-size:17px;font-weight:700;display:flex;align-items:center;">
-        {_status_dot(node.status, show=True)}{html_escape(node.title)}
-      </summary>
-      {body}
-    </details>
+    <div style="margin-left:{depth_px}px;border:1px solid #e5e7eb;border-radius:14px;background:#ffffff;margin-top:10px;overflow:hidden;">
+      <div style="padding:14px 16px 8px 16px;font-size:17px;font-weight:800;color:#111827;">
+        <span>{html_escape(node.title)}</span>
+      </div>
+      <div style="padding:8px 16px 16px 16px;">
+        <div style="white-space:pre-wrap;line-height:1.8;color:#111827;">{html_escape(content)}</div>
+      </div>
+    </div>
     """
 
 
 def _render_section(node: TreeNode, depth_px: int = 0) -> str:
     summary_html = f"""
-    <summary style="list-style:none;cursor:pointer;font-size:18px;font-weight:800;display:flex;align-items:center;">
+    <summary style="list-style:none;cursor:pointer;font-size:18px;font-weight:800;display:flex;align-items:center;color:#111827;">
       {html_escape(node.title)}
     </summary>
     """
@@ -110,15 +206,15 @@ def _render_section(node: TreeNode, depth_px: int = 0) -> str:
     for child in node.children:
         if child.node_type == "test":
             inner += _render_test_leaf(child, depth_px=18)
+        elif child.node_type == "content":
+            inner += _render_content_leaf(child, depth_px=18)
         else:
             inner += _render_section(child, depth_px=18)
 
     return f"""
     <details open style="margin-left:{depth_px}px;border:1px solid #dbe3ea;border-radius:14px;padding:12px 16px;background:#fafcff;margin-top:12px;">
       {summary_html}
-      <div style="padding-top:6px;">
-        {inner}
-      </div>
+      <div style="padding-top:6px;">{inner}</div>
     </details>
     """
 
@@ -126,19 +222,19 @@ def _render_section(node: TreeNode, depth_px: int = 0) -> str:
 def render_result_html(result: ProcessingResult) -> str:
     styles = """
     <style>
-    details > summary::-webkit-details-marker { display:none; }
-    details > summary::before {
-      content: "▸";
-      font-size: 16px;
-      color: #4b5563;
-      margin-right: 10px;
-      display: inline-block;
-      transform: rotate(0deg);
-      transition: transform 0.15s ease-in-out;
-    }
-    details[open] > summary::before {
-      transform: rotate(90deg);
-    }
+      details > summary::-webkit-details-marker { display:none; }
+      details > summary::before {
+        content: "▸";
+        font-size: 16px;
+        color: #4b5563;
+        margin-right: 10px;
+        display: inline-block;
+        transform: rotate(0deg);
+        transition: transform 0.15s ease-in-out;
+      }
+      details[open] > summary::before {
+        transform: rotate(90deg);
+      }
     </style>
     """
 

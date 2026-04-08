@@ -21,6 +21,7 @@ MASS_FACTORS = {
     "mg": 1e-3,
     "ug": 1e-6,
     "μg": 1e-6,
+    "µg": 1e-6,
     "ng": 1e-9,
 }
 
@@ -31,6 +32,15 @@ VOLUME_FACTORS = {
     "ml": 1e-3,
     "uL": 1e-6,
     "μL": 1e-6,
+    "µL": 1e-6,
+}
+
+AMOUNT_FACTORS = {
+    "mol": 1.0,
+    "mmol": 1e-3,
+    "umol": 1e-6,
+    "μmol": 1e-6,
+    "µmol": 1e-6,
 }
 
 FRACTION_FACTORS = {
@@ -56,6 +66,7 @@ DIMENSIONLESS_UNITS = {
 KNOWN_UNIT_PREFIXES = [
     "mOsm/kg",
     "Osm/kg",
+    "CFU/10mL",
     "CFU/mL",
     "CFU/ml",
     "CFU/m",
@@ -66,18 +77,35 @@ KNOWN_UNIT_PREFIXES = [
     "EU/ml",
     "IU/mL",
     "IU/ml",
+    "ug/DU",
+    "μg/DU",
+    "µg/DU",
     "LD50/mL",
     "LD40/mL",
+    "mmol/L",
+    "umol/L",
+    "μmol/L",
+    "µmol/L",
+    "mol/L",
+    "mm[Hg]",
+    "mmHg",
     "mL",
     "ml",
     "uL",
     "μL",
+    "µL",
     "kg",
     "mg",
     "μg",
+    "µg",
     "ug",
     "ng",
     "g",
+    "mmol",
+    "umol",
+    "μmol",
+    "µmol",
+    "mol",
     "ppm",
     "ppb",
     "ppth",
@@ -92,11 +120,46 @@ def _pretty_number(value: float) -> str:
     return f"{value:.12g}"
 
 
+def _normalize_measurement_text(text: str) -> str:
+    text = clean_text(text)
+    if not text:
+        return ""
+
+    replacements = {
+        "µ": "μ",
+        "㎍": "ug",
+        "㎕": "uL",
+        "㎖": "mL",
+        "℃": "°C",
+        " of protein/DU": "/DU",
+        " ofprotein/DU": "/DU",
+        "of protein/DU": "/DU",
+        "ofprotein/DU": "/DU",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+
+    text = re.sub(r"(u|μ)g\s*/\s*DU", lambda m: f"{m.group(1)}g/DU", text)
+    text = re.sub(r"(u|μ)g\s+of\s+protein\s*/\s*DU", lambda m: f"{m.group(1)}g/DU", text, flags=re.I)
+    text = re.sub(r"(u|μ)g\s*ofprotein\s*/\s*DU", lambda m: f"{m.group(1)}g/DU", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _normalize_unit_alias(unit: str) -> str:
     aliases = {
         "％": "%",
         "㎖": "mL",
         "ℓ": "L",
+        "µ": "μ",
+        "µg": "μg",
+        "µL": "μL",
+        "µmol": "μmol",
+        "µg/DU": "μg/DU",
+        "㎍": "ug",
+        "㎕": "uL",
+        "㎛": "um",
+        "mmHg": "mm[Hg]",
     }
     return aliases.get(unit, unit)
 
@@ -112,8 +175,7 @@ def _extract_unit_prefix(tail: str) -> str:
         if tail.startswith(unit):
             return _normalize_unit_alias(unit)
 
-    # 알려진 단위가 아니면 한글이 나오기 전까지의 비한글 토큰만 unit 후보로 사용
-    m = re.match(r"([A-Za-zμ%/²0-9\-\.]+)", tail)
+    m = re.match(r"([A-Za-zμµ%/²0-9\-\.\[\]]+)", tail)
     if m:
         return _normalize_unit_alias(m.group(1))
 
@@ -124,7 +186,7 @@ def parse_number_and_unit(text: str | None) -> Optional[ParsedMeasurement]:
     if not text:
         return None
 
-    text = clean_text(text)
+    text = _normalize_measurement_text(text)
     m = re.search(r"(-?\d+(?:\.\d+)?)", text)
     if not m:
         return None
@@ -143,8 +205,7 @@ def parse_number_and_unit(text: str | None) -> Optional[ParsedMeasurement]:
         )
 
     if unit in FRACTION_FACTORS:
-        factor = FRACTION_FACTORS[unit]
-        canonical_value = value * factor
+        canonical_value = value * FRACTION_FACTORS[unit]
         return ParsedMeasurement(
             value=value,
             unit_raw=unit,
@@ -171,6 +232,28 @@ def parse_number_and_unit(text: str | None) -> Optional[ParsedMeasurement]:
         if num_u in MASS_FACTORS and den_u in VOLUME_FACTORS:
             canonical = "g/L"
             value_canonical = value * MASS_FACTORS[num_u] / VOLUME_FACTORS[den_u]
+            return ParsedMeasurement(
+                value=value,
+                unit_raw=unit,
+                unit_canonical=canonical,
+                value_canonical=value_canonical,
+                pretty=f"{_pretty_number(value_canonical)} {canonical}",
+            )
+
+        if num_u in AMOUNT_FACTORS and den_u in VOLUME_FACTORS:
+            canonical = "mol/L"
+            value_canonical = value * AMOUNT_FACTORS[num_u] / VOLUME_FACTORS[den_u]
+            return ParsedMeasurement(
+                value=value,
+                unit_raw=unit,
+                unit_canonical=canonical,
+                value_canonical=value_canonical,
+                pretty=f"{_pretty_number(value_canonical)} {canonical}",
+            )
+
+        if num_u in MASS_FACTORS and den_u == "DU":
+            canonical = "g/DU"
+            value_canonical = value * MASS_FACTORS[num_u]
             return ParsedMeasurement(
                 value=value,
                 unit_raw=unit,
@@ -207,6 +290,25 @@ def parse_number_and_unit(text: str | None) -> Optional[ParsedMeasurement]:
             unit_canonical="L",
             value_canonical=canonical_value,
             pretty=f"{_pretty_number(canonical_value)} L",
+        )
+
+    if unit in AMOUNT_FACTORS:
+        canonical_value = value * AMOUNT_FACTORS[unit]
+        return ParsedMeasurement(
+            value=value,
+            unit_raw=unit,
+            unit_canonical="mol",
+            value_canonical=canonical_value,
+            pretty=f"{_pretty_number(canonical_value)} mol",
+        )
+
+    if unit in {"mm[Hg]"}:
+        return ParsedMeasurement(
+            value=value,
+            unit_raw=unit,
+            unit_canonical="mm[Hg]",
+            value_canonical=value,
+            pretty=f"{_pretty_number(value)} mm[Hg]",
         )
 
     if unit in DIMENSIONLESS_UNITS:

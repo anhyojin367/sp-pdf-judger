@@ -23,6 +23,18 @@ UCUM_JSON_CANDIDATES = [
     Path("/mnt/data/ucum_rag_docs.json"),
 ]
 
+UCUM_JSONL_CANDIDATES = [
+    BASE_DIR / "ucum_rag_image_units_ui_micro.jsonl",
+    Path("/mnt/data/ucum_rag_image_units_ui_micro.jsonl"),
+    BASE_DIR / "ucum_rag_image_units_enriched.jsonl",
+    Path("/mnt/data/ucum_rag_image_units_enriched.jsonl"),
+]
+
+UCUM_XLSX_CANDIDATES = [
+    BASE_DIR / "TableOfExampleUcumCodesForElectronicMessaging.xlsx",
+    Path("/mnt/data/TableOfExampleUcumCodesForElectronicMessaging.xlsx"),
+]
+
 LEGACY_EXTRACTOR_OUTDIR_NAME = "legacy_extract"
 
 PASS_LABEL = "적합"

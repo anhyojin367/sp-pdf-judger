@@ -17,12 +17,34 @@ class ParsedCriteria:
     raw: str = ""
 
 
-def parse_criteria_text(criteria: str | None) -> ParsedCriteria:
-    raw = clean_text(criteria)
-    if not raw:
-        return ParsedCriteria(kind="unknown", raw=raw)
+def _normalize_criteria_text(criteria: str | None) -> str:
+    text = clean_text(criteria)
+    if not text:
+        return ""
 
-    m_range = re.search(r"(\d+(?:\.\d+)?)\s*~\s*(\d+(?:\.\d+)?)\s*([A-Za-zμ%/²0-9\-\.·]*)", raw)
+    text = text.replace("\\n", " ")
+    text = text.replace("（", "(").replace("）", ")")
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"^기준\s*", "", text)
+
+    m = re.match(r"^\(([^)]+)\)\s*(이상|이하|미만|초과)$", text)
+    if m:
+        text = f"{m.group(1)} {m.group(2)}"
+
+    m = re.match(r"^(이상|이하|미만|초과)\s*\(?\s*([0-9]+(?:\.[0-9]+)?\s*[A-Za-zμµ%/²0-9\-\.·\[\]]*)\s*\)?$", text)
+    if m:
+        text = f"{m.group(2)} {m.group(1)}"
+
+    text = re.sub(r"\(([0-9]+(?:\.[0-9]+)?(?:\s*[A-Za-zμµ%/²0-9\-\.·\[\]]*)?)\)\s*(이상|이하|미만|초과)", r"\1 \2", text)
+    return clean_text(text)
+
+
+def parse_criteria_text(criteria: str | None) -> ParsedCriteria:
+    raw = _normalize_criteria_text(criteria)
+    if not raw:
+        return ParsedCriteria(kind="unknown", raw=clean_text(criteria))
+
+    m_range = re.search(r"(\d+(?:\.\d+)?)\s*~\s*(\d+(?:\.\d+)?)\s*([A-Za-zμµ%/²0-9\-\.·\[\]]*)", raw)
     if m_range:
         lo = parse_number_and_unit(f"{m_range.group(1)} {m_range.group(3)}")
         hi = parse_number_and_unit(f"{m_range.group(2)} {m_range.group(3)}")
