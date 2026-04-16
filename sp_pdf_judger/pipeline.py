@@ -53,10 +53,15 @@ class DocumentJudgePipeline:
         section_title_map = _load_section_title_map(records_json_path)
         tree = build_document_tree(records, evaluations, section_title_map=section_title_map)
 
+        comparable = [
+            x for x in evaluations
+            if x.comparison_completed and x.final_status in {PASS_LABEL, FAIL_LABEL}
+        ]
+
         summary = Summary(
-            passed=sum(1 for x in evaluations if x.final_status == PASS_LABEL),
-            failed=sum(1 for x in evaluations if x.final_status == FAIL_LABEL),
-            total=len(evaluations),
+            passed=sum(1 for x in comparable if x.final_status == PASS_LABEL),
+            failed=sum(1 for x in comparable if x.final_status == FAIL_LABEL),
+            total=len(comparable),
         )
 
         return ProcessingResult(
@@ -69,6 +74,8 @@ class DocumentJudgePipeline:
             metadata={
                 "llm_enabled": self.llm_client.enabled,
                 "record_count": len(records),
+                "evaluation_count": len(evaluations),
+                "comparison_completed_count": len(comparable),
                 "records_json_path": str(records_json_path),
                 "extract_dir": str(extract_dir),
                 "rag_doc_count": len(self.rag_store.docs),
