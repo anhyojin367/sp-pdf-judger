@@ -8,3 +8,4 @@ google-genai>=1.0.0
 pydantic>=2.8
 python-dotenv>=1.0
 openpyxl
+PyYAML>=6.0.0
