@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .config import FAIL_LABEL, PASS_LABEL, STATUS_COLORS
+from .config import FAIL_LABEL, HOLD_LABEL, PASS_LABEL, STATUS_COLORS
 from .schemas import ProcessingResult, Summary, TreeNode
 from .utils import html_escape
 
@@ -11,14 +11,22 @@ def render_summary_card(summary: Summary) -> str:
     return f"""
     <div style="border:1px solid #e5e7eb;border-radius:18px;padding:20px;background:#ffffff;box-shadow:0 6px 20px rgba(0,0,0,0.03);">
       <div style="font-size:24px;font-weight:800;margin-bottom:18px;">요약</div>
+
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:18px;">
         <span style="width:14px;height:14px;border-radius:50%;display:inline-block;background:{STATUS_COLORS[PASS_LABEL]};"></span>
         <span>검수합격: <b>{summary.passed}</b>건</span>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;font-size:18px;">
+
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:18px;">
         <span style="width:14px;height:14px;border-radius:50%;display:inline-block;background:{STATUS_COLORS[FAIL_LABEL]};"></span>
         <span>검수불합격: <b>{summary.failed}</b>건</span>
       </div>
+
+      <div style="display:flex;align-items:center;gap:10px;font-size:18px;">
+        <span style="width:14px;height:14px;border-radius:50%;display:inline-block;background:{STATUS_COLORS[HOLD_LABEL]};"></span>
+        <span>검수보류: <b>{summary.held}</b>건</span>
+      </div>
+
       <div style="margin-top:12px;color:#6b7280;">전체 {summary.total}건</div>
     </div>
     """
@@ -27,8 +35,41 @@ def render_summary_card(summary: Summary) -> str:
 def _normalize_display_value(value: str | None) -> str:
     if not value:
         return ""
+
     value = value.replace("\\r\\n", "\n").replace("\\n", "\n")
     value = value.replace("\r\n", "\n").replace("\r", "\n")
+    value = value.replace("µ", "μ")
+    value = value.replace("×", "x")
+
+    normal_to_sup = str.maketrans(
+        {
+            "0": "⁰",
+            "1": "¹",
+            "2": "²",
+            "3": "³",
+            "4": "⁴",
+            "5": "⁵",
+            "6": "⁶",
+            "7": "⁷",
+            "8": "⁸",
+            "9": "⁹",
+            "-": "⁻",
+            "+": "⁺",
+        }
+    )
+
+    def repl(match):
+        base = match.group("base")
+        exp = match.group("exp")
+        exp = exp.translate(normal_to_sup)
+        return f"{base} x 10{exp}"
+
+    value = re.sub(
+        r"(?P<base>\d+(?:\.\d+)?)\s*[xX]\s*10\s*(?:\^\s*)?(?P<exp>[+\-]?\d+)",
+        repl,
+        value,
+    )
+
     return value.strip()
 
 
@@ -36,7 +77,6 @@ def _format_criteria_display(value: str | None) -> str | None:
     text = _normalize_display_value(value)
     if not text:
         return None
-
     compact = re.sub(r"\s+", " ", text).strip()
     compact = compact.replace("（", "(").replace("）", ")")
     compact = re.sub(r"기준\s*\(([^)]+)\)\s*(이상|이하|미만|초과)", r"\1 \2", compact)
@@ -50,9 +90,10 @@ def _status_light(status: str | None) -> str:
         color = STATUS_COLORS[PASS_LABEL]
     elif status == FAIL_LABEL:
         color = STATUS_COLORS[FAIL_LABEL]
+    elif status == HOLD_LABEL:
+        color = STATUS_COLORS[HOLD_LABEL]
     else:
         color = "#d1d5db"
-
     return f'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};"></span>'
 
 
@@ -78,8 +119,10 @@ def _render_lot_table(ev) -> str:
     if not rows:
         return ""
 
+    first_label = rows[0].get("item_label") or "항목"
+
     header = "".join([
-        '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:left;background:#f8fafc;">로트번호</th>',
+        f'<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:left;background:#f8fafc;">{html_escape(first_label)}</th>',
         '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:left;background:#f8fafc;">시험기간</th>',
         '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:left;background:#f8fafc;">시험결과</th>',
         '<th style="border:1px solid #dbe3ea;padding:8px 10px;text-align:center;background:#f8fafc;">판정</th>',
@@ -87,9 +130,10 @@ def _render_lot_table(ev) -> str:
 
     body_rows = []
     for row in rows:
+        item_value = row.get("item_value") or row.get("lot_no", "")
         body_rows.append(
             "<tr>"
-            f'<td style="border:1px solid #dbe3ea;padding:8px 10px;">{html_escape(row.get("lot_no", ""))}</td>'
+            f'<td style="border:1px solid #dbe3ea;padding:8px 10px;">{html_escape(item_value)}</td>'
             f'<td style="border:1px solid #dbe3ea;padding:8px 10px;">{html_escape(row.get("test_date", ""))}</td>'
             f'<td style="border:1px solid #dbe3ea;padding:8px 10px;">{html_escape(row.get("result", ""))}</td>'
             f'<td style="border:1px solid #dbe3ea;padding:8px 10px;text-align:center;">{_status_light(row.get("status"))}</td>'
@@ -116,9 +160,9 @@ def _render_reason_box(ev) -> str:
     rows = getattr(ev, "lot_judgements", None) or []
     if rows:
         reason_html = "".join(
-            f'<div style="margin-top:6px;"><b>{html_escape(row.get("lot_no", ""))}</b>: {html_escape(row.get("reason", ""))}</div>'
+            f'<div style="margin-top:6px;"><b>{html_escape(row.get("item_value") or row.get("lot_no", ""))}</b>: {html_escape(row.get("reason", ""))}</div>'
             for row in rows
-            if row.get("lot_no") and row.get("reason")
+            if (row.get("item_value") or row.get("lot_no")) and row.get("reason")
         )
     else:
         if not getattr(ev, "reason", ""):
@@ -219,22 +263,57 @@ def _render_section(node: TreeNode, depth_px: int = 0) -> str:
     """
 
 
+def render_manufacturing_summary_card(result: ProcessingResult) -> str:
+    status = result.manufacturing_summary_status
+    reason = result.manufacturing_summary_reason
+
+    if not status and not reason:
+        return ""
+
+    if status == PASS_LABEL:
+        color = STATUS_COLORS[PASS_LABEL]
+    elif status == FAIL_LABEL:
+        color = STATUS_COLORS[FAIL_LABEL]
+    elif status == HOLD_LABEL:
+        color = STATUS_COLORS[HOLD_LABEL]
+    else:
+        color = "#9ca3af"
+
+    page_text = ""
+    if result.manufacturing_summary_page_numbers:
+        page_text = " / ".join(str(x) for x in result.manufacturing_summary_page_numbers)
+        page_text = f"대상 페이지: {page_text}"
+
+    return f"""
+    <div style="margin-top:14px;margin-bottom:18px;padding:16px 18px;border-radius:16px;background:#ffffff;border:1px solid #dbe3ea;border-left:6px solid {color};box-shadow:0 6px 18px rgba(15,23,42,0.04);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div style="font-size:18px;font-weight:900;color:#111827;">제조요약도 날짜 선행관계 판정</div>
+        <div style="display:flex;align-items:center;gap:8px;font-weight:900;color:#111827;">
+          <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{color};"></span>
+          <span>{html_escape(status or "미판정")}</span>
+        </div>
+      </div>
+      {f'<div style="margin-top:8px;color:#6b7280;font-size:14px;">{html_escape(page_text)}</div>' if page_text else ''}
+      <div style="margin-top:12px;line-height:1.75;color:#111827;white-space:pre-wrap;">{html_escape(reason or "")}</div>
+    </div>
+    """
+
 def render_result_html(result: ProcessingResult) -> str:
     styles = """
     <style>
-      details > summary::-webkit-details-marker { display:none; }
-      details > summary::before {
-        content: "▸";
-        font-size: 16px;
-        color: #4b5563;
-        margin-right: 10px;
-        display: inline-block;
-        transform: rotate(0deg);
-        transition: transform 0.15s ease-in-out;
-      }
-      details[open] > summary::before {
-        transform: rotate(90deg);
-      }
+    details > summary::-webkit-details-marker { display:none; }
+    details > summary::before {
+      content: "▸";
+      font-size: 16px;
+      color: #4b5563;
+      margin-right: 10px;
+      display: inline-block;
+      transform: rotate(0deg);
+      transition: transform 0.15s ease-in-out;
+    }
+    details[open] > summary::before {
+      transform: rotate(90deg);
+    }
     </style>
     """
 

@@ -37,12 +37,14 @@ UCUM_XLSX_CANDIDATES = [
 
 LEGACY_EXTRACTOR_OUTDIR_NAME = "legacy_extract"
 
-PASS_LABEL = "적합"
-FAIL_LABEL = "부적합"
+PASS_LABEL = "검수합격"
+FAIL_LABEL = "검수불합격"
+HOLD_LABEL = "검수보류"
 
 STATUS_COLORS = {
-    PASS_LABEL: "#21c55d",
+    PASS_LABEL: "#22c55e",
     FAIL_LABEL: "#ef4444",
+    HOLD_LABEL: "#f59e0b",
 }
 
 SECTION_NUMBER_RE = r"^(\d+(?:\.\d+)*)\.?\s+(.+)$"

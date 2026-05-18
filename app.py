@@ -8,7 +8,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from sp_pdf_judger.pipeline import DocumentJudgePipeline
-from sp_pdf_judger.ui_html import render_result_html, render_summary_card
+from sp_pdf_judger.ui_html import (
+    render_result_html,
+    render_summary_card,
+    render_manufacturing_summary_card,
+)
 
 
 st.set_page_config(
@@ -39,6 +43,17 @@ def main() -> None:
             padding-top: 1.5rem;
             padding-bottom: 2rem;
         }
+
+        .pdf-preview-title {
+            font-size: 18px;
+            font-weight: 800;
+            margin: 10px 0 12px 0;
+            color: #111827;
+        }
+
+        .pdf-preview-section {
+            margin-bottom: 24px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -55,7 +70,7 @@ def main() -> None:
         return
 
     pdf_path = save_upload_to_cache(uploaded_pdf)
-    cache_key = f"processed::{pdf_path.name}::{pdf_path.stat().st_size}"
+    cache_key = f"processed_v8::{pdf_path.name}::{pdf_path.stat().st_size}"
 
     if cache_key not in st.session_state:
         with st.spinner("PDF를 분석하고 있습니다..."):
@@ -65,10 +80,47 @@ def main() -> None:
     result = st.session_state[cache_key]
 
     col1, col2 = st.columns([3.4, 1.2], gap="large")
+
     with col1:
-        st.image(str(result.preview_image_path), use_container_width=True)
+        #st.markdown(
+        #    '<div class="pdf-preview-title">첫 페이지</div>',
+        #    unsafe_allow_html=True,
+        #)
+        st.image(
+            str(result.preview_image_path),
+            use_container_width=True,
+        )
+
+        manufacturing_summary_image_paths = getattr(
+            result,
+            "manufacturing_summary_image_paths",
+            [],
+        )
+
+        if manufacturing_summary_image_paths:
+            st.markdown(
+                '<div class="pdf-preview-title">제조요약도</div>',
+                unsafe_allow_html=True,
+            )
+
+            for image_path in manufacturing_summary_image_paths:
+                st.image(
+                    str(image_path),
+                    use_container_width=True,
+                )
+
+            manufacturing_summary_card = render_manufacturing_summary_card(result)
+            if manufacturing_summary_card:
+                st.markdown(
+                    manufacturing_summary_card,
+                    unsafe_allow_html=True,
+                )
+
     with col2:
-        st.markdown(render_summary_card(result.summary), unsafe_allow_html=True)
+        st.markdown(
+            render_summary_card(result.summary),
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 

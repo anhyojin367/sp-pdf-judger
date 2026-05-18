@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 from .utils import clean_text
 
@@ -10,329 +9,290 @@ from .utils import clean_text
 @dataclass
 class ParsedMeasurement:
     value: float
-    unit_raw: str
-    unit_canonical: str
+    unit: str
     value_canonical: float
+    unit_canonical: str
     pretty: str
 
 
-MASS_FACTORS = {
-    "g": 1.0,
-    "mg": 1e-3,
-    "ug": 1e-6,
-    "μg": 1e-6,
-    "µg": 1e-6,
-    "ng": 1e-9,
-}
-
-VOLUME_FACTORS = {
-    "L": 1.0,
-    "l": 1.0,
-    "mL": 1e-3,
-    "ml": 1e-3,
-    "uL": 1e-6,
-    "μL": 1e-6,
-    "µL": 1e-6,
-}
-
-AMOUNT_FACTORS = {
-    "mol": 1.0,
-    "mmol": 1e-3,
-    "umol": 1e-6,
-    "μmol": 1e-6,
-    "µmol": 1e-6,
-}
-
-FRACTION_FACTORS = {
-    "%": 1e-2,
-    "ppm": 1e-6,
-    "ppb": 1e-9,
-    "ppth": 1e-3,
-}
-
-OSMOLALITY_FACTORS = {
-    "Osm/kg": 1.0,
-    "mOsm/kg": 1e-3,
-}
-
-DIMENSIONLESS_UNITS = {
-    "",
-    "배",
-    "비중",
-    "ratio",
-    "scalar",
-}
-
-KNOWN_UNIT_PREFIXES = [
-    "mOsm/kg",
-    "Osm/kg",
-    "CFU/10mL",
-    "CFU/mL",
-    "CFU/ml",
-    "CFU/m",
-    "PFU/mL",
-    "PFU/ml",
-    "PFU/m",
-    "EU/mL",
-    "EU/ml",
-    "IU/mL",
-    "IU/ml",
-    "ug/DU",
-    "μg/DU",
-    "µg/DU",
-    "LD50/mL",
-    "LD40/mL",
-    "mmol/L",
-    "umol/L",
-    "μmol/L",
-    "µmol/L",
-    "mol/L",
-    "mm[Hg]",
-    "mmHg",
-    "mL",
-    "ml",
-    "uL",
-    "μL",
-    "µL",
-    "kg",
-    "mg",
-    "μg",
-    "µg",
-    "ug",
-    "ng",
-    "g",
-    "mmol",
-    "umol",
-    "μmol",
-    "µmol",
-    "mol",
-    "ppm",
-    "ppb",
-    "ppth",
-    "%",
-    "배",
-    "비중",
-    "pH",
-]
-
-
-def _pretty_number(value: float) -> str:
-    return f"{value:.12g}"
-
-
-def _normalize_measurement_text(text: str) -> str:
-    text = clean_text(text)
-    if not text:
-        return ""
-
-    replacements = {
-        "µ": "μ",
-        "㎍": "ug",
-        "㎕": "uL",
-        "㎖": "mL",
-        "℃": "°C",
-        " of protein/DU": "/DU",
-        " ofprotein/DU": "/DU",
-        "of protein/DU": "/DU",
-        "ofprotein/DU": "/DU",
+_SUP_TO_NORMAL = str.maketrans(
+    {
+        "⁰": "0",
+        "¹": "1",
+        "²": "2",
+        "³": "3",
+        "⁴": "4",
+        "⁵": "5",
+        "⁶": "6",
+        "⁷": "7",
+        "⁸": "8",
+        "⁹": "9",
+        "⁻": "-",
+        "⁺": "+",
     }
-    for src, dst in replacements.items():
-        text = text.replace(src, dst)
+)
 
-    text = re.sub(r"(u|μ)g\s*/\s*DU", lambda m: f"{m.group(1)}g/DU", text)
-    text = re.sub(r"(u|μ)g\s+of\s+protein\s*/\s*DU", lambda m: f"{m.group(1)}g/DU", text, flags=re.I)
-    text = re.sub(r"(u|μ)g\s*ofprotein\s*/\s*DU", lambda m: f"{m.group(1)}g/DU", text, flags=re.I)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-
-def _normalize_unit_alias(unit: str) -> str:
-    aliases = {
-        "％": "%",
-        "㎖": "mL",
-        "ℓ": "L",
-        "µ": "μ",
-        "µg": "μg",
-        "µL": "μL",
-        "µmol": "μmol",
-        "µg/DU": "μg/DU",
-        "㎍": "ug",
-        "㎕": "uL",
-        "㎛": "um",
-        "mmHg": "mm[Hg]",
+_NORMAL_TO_SUP = str.maketrans(
+    {
+        "0": "⁰",
+        "1": "¹",
+        "2": "²",
+        "3": "³",
+        "4": "⁴",
+        "5": "⁵",
+        "6": "⁶",
+        "7": "⁷",
+        "8": "⁸",
+        "9": "⁹",
+        "-": "⁻",
+        "+": "⁺",
     }
-    return aliases.get(unit, unit)
+)
 
 
-def _extract_unit_prefix(tail: str) -> str:
+UNIT_ALIASES = {
+    "": "scalar",
+    "%": "fraction",
+
+    "mL": "mL",
+    "ml": "mL",
+    "ML": "mL",
+    "L": "L",
+
+    "mg": "mg",
+    "g": "g",
+    "kg": "kg",
+    "μg": "μg",
+    "µg": "μg",
+    "ug": "μg",
+    "ng": "ng",
+
+    "μg/mL": "μg/mL",
+    "µg/mL": "μg/mL",
+    "ug/mL": "μg/mL",
+    "mg/mL": "mg/mL",
+    "ng/mL": "ng/mL",
+
+    "μg/mg of protein": "μg/mg of protein",
+    "µg/mg of protein": "μg/mg of protein",
+    "ug/mg of protein": "μg/mg of protein",
+    "ng/mg of protein": "ng/mg of protein",
+
+    "EU/mL": "EU/mL",
+    "EU/ml": "EU/mL",
+    "EU/dose": "EU/dose",
+    "EU/mg of protein": "EU/mg of protein",
+
+    "IU/mL": "IU/mL",
+    "IU/ml": "IU/mL",
+
+    "CFU/mL": "CFU/mL",
+    "CFU/ml": "CFU/mL",
+    "CFU/10mL": "CFU/10mL",
+    "CFU/10ml": "CFU/10mL",
+
+    "cells/mL": "cells/mL",
+    "cell/mL": "cells/mL",
+    "cells/ml": "cells/mL",
+    "cell/ml": "cells/mL",
+
+    "mOsm/kg": "mOsm/kg",
+    "mOsmol": "mOsmol",
+
+    "nm": "nm",
+    "Da": "Da",
+    "kDa": "kDa",
+
+    "개": "count",
+    "개/vial": "count_per_vial",
+}
+
+
+KNOWN_UNITS = sorted(UNIT_ALIASES.keys(), key=len, reverse=True)
+
+
+def _superscript(exp: str) -> str:
+    return exp.translate(_NORMAL_TO_SUP)
+
+
+def _normalize_exp(exp: str | None) -> int | None:
+    if exp is None:
+        return None
+
+    exp = clean_text(exp)
+    if not exp:
+        return None
+
+    exp = exp.replace("^", "")
+    exp = exp.translate(_SUP_TO_NORMAL)
+    exp = re.sub(r"\s+", "", exp)
+
+    try:
+        return int(exp)
+    except ValueError:
+        return None
+
+
+def _format_base_number(value: float, original: str) -> str:
+    original = clean_text(original).replace(",", "")
+
+    if "." in original:
+        decimals = len(original.split(".", 1)[1])
+        decimals = min(max(decimals, 1), 4)
+        return f"{value:.{decimals}f}"
+
+    if value.is_integer():
+        return str(int(value))
+
+    return str(value)
+
+
+def _clean_unit_tail(tail: str) -> str:
     tail = clean_text(tail)
     if not tail:
         return ""
 
-    tail = re.sub(r"^[~\-=:：\s]+", "", tail)
+    tail = tail.replace("％", "%")
+    tail = tail.replace("µ", "μ")
 
-    for unit in sorted(KNOWN_UNIT_PREFIXES, key=len, reverse=True):
-        if tail.startswith(unit):
-            return _normalize_unit_alias(unit)
+    tail = re.split(
+        r"\s*(이상|이하|초과|미만|이어야|하여야|함|일치|확인|무|음성|양성|불검출|검출)\b",
+        tail,
+        maxsplit=1,
+    )[0]
 
-    m = re.match(r"([A-Za-zμµ%/²0-9\-\.\[\]]+)", tail)
-    if m:
-        return _normalize_unit_alias(m.group(1))
-
-    return ""
+    tail = tail.strip(" :：,;()[]{}")
+    return tail
 
 
-def parse_number_and_unit(text: str | None) -> Optional[ParsedMeasurement]:
+def _extract_unit(tail: str) -> str:
+    tail = _clean_unit_tail(tail)
+    if not tail:
+        return ""
+
+    compact_tail = tail.replace(" ", "")
+
+    for unit in KNOWN_UNITS:
+        if not unit:
+            continue
+
+        unit_compact = unit.replace(" ", "")
+
+        if compact_tail.startswith(unit_compact):
+            return unit
+
+    first = tail.split()[0] if tail.split() else tail
+    first = first.strip(" :：,;()[]{}")
+    return first
+
+
+def _canonicalize_unit(unit: str) -> str:
+    unit = clean_text(unit).replace("µ", "μ")
+    return UNIT_ALIASES.get(unit, unit or "scalar")
+
+
+def _canonicalize_value(value: float, unit_canonical: str) -> float:
+    if unit_canonical == "fraction":
+        return value / 100.0
+
+    return value
+
+
+def _format_pretty(
+    base_value: float,
+    base_original: str,
+    exponent: int | None,
+    unit: str,
+) -> str:
+    number_part = _format_base_number(base_value, base_original)
+
+    if exponent is not None:
+        number_part = f"{number_part} x 10{_superscript(str(exponent))}"
+
+    if unit == "%":
+        return f"{number_part}%"
+
+    if unit:
+        return f"{number_part} {unit}"
+
+    return number_part
+
+
+def parse_number_and_unit(text: str | None) -> ParsedMeasurement | None:
+    """
+    지원 예시:
+    - 3.00 x 10^6 cells/mL
+    - 3.00 x 10⁶ cells/mL
+    - 10.00 x 10^6 cells/mL 이상
+    - 91%
+    - ≤100.0EU/mL
+    - 25EU/mL
+    """
+    text = clean_text(text)
+
     if not text:
         return None
 
-    text = _normalize_measurement_text(text)
-    m = re.search(r"(-?\d+(?:\.\d+)?)", text)
-    if not m:
+    text = text.replace("×", "x")
+    text = text.replace("％", "%")
+    text = text.replace("µ", "μ")
+
+    pattern = re.compile(
+        r"(?P<base>[+-]?\d[\d,]*(?:\.\d+)?)"
+        r"(?:\s*[xX]\s*10\s*(?:\^\s*)?(?P<exp>[+\-]?\d+|[⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]+))?"
+    )
+
+    match = pattern.search(text)
+    if not match:
         return None
 
-    value = float(m.group(1))
-    tail = text[m.end():]
-    unit = _extract_unit_prefix(tail)
+    base_original = match.group("base")
+    base_value = float(base_original.replace(",", ""))
 
-    if "pH" in text or unit.lower() == "ph":
-        return ParsedMeasurement(
-            value=value,
-            unit_raw="pH",
-            unit_canonical="pH",
-            value_canonical=value,
-            pretty=f"{_pretty_number(value)} pH",
-        )
+    exponent = _normalize_exp(match.group("exp"))
+    value = base_value * (10 ** exponent) if exponent is not None else base_value
 
-    if unit in FRACTION_FACTORS:
-        canonical_value = value * FRACTION_FACTORS[unit]
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit,
-            unit_canonical="fraction",
-            value_canonical=canonical_value,
-            pretty=f"{_pretty_number(canonical_value)} fraction",
-        )
+    tail = text[match.end():]
+    unit = _extract_unit(tail)
+    unit = unit.replace("µ", "μ")
 
-    if unit in OSMOLALITY_FACTORS:
-        canonical_value = value * OSMOLALITY_FACTORS[unit]
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit,
-            unit_canonical="Osm/kg",
-            value_canonical=canonical_value,
-            pretty=f"{_pretty_number(canonical_value)} Osm/kg",
-        )
+    unit_canonical = _canonicalize_unit(unit)
+    value_canonical = _canonicalize_value(value, unit_canonical)
 
-    if "/" in unit:
-        num_u, den_u = unit.split("/", 1)
-        num_u = num_u.strip()
-        den_u = den_u.strip()
-
-        if num_u in MASS_FACTORS and den_u in VOLUME_FACTORS:
-            canonical = "g/L"
-            value_canonical = value * MASS_FACTORS[num_u] / VOLUME_FACTORS[den_u]
-            return ParsedMeasurement(
-                value=value,
-                unit_raw=unit,
-                unit_canonical=canonical,
-                value_canonical=value_canonical,
-                pretty=f"{_pretty_number(value_canonical)} {canonical}",
-            )
-
-        if num_u in AMOUNT_FACTORS and den_u in VOLUME_FACTORS:
-            canonical = "mol/L"
-            value_canonical = value * AMOUNT_FACTORS[num_u] / VOLUME_FACTORS[den_u]
-            return ParsedMeasurement(
-                value=value,
-                unit_raw=unit,
-                unit_canonical=canonical,
-                value_canonical=value_canonical,
-                pretty=f"{_pretty_number(value_canonical)} {canonical}",
-            )
-
-        if num_u in MASS_FACTORS and den_u == "DU":
-            canonical = "g/DU"
-            value_canonical = value * MASS_FACTORS[num_u]
-            return ParsedMeasurement(
-                value=value,
-                unit_raw=unit,
-                unit_canonical=canonical,
-                value_canonical=value_canonical,
-                pretty=f"{_pretty_number(value_canonical)} {canonical}",
-            )
-
-        if num_u in {"CFU", "PFU", "EU", "IU", "LD50", "LD40"}:
-            canonical = f"{num_u}/{den_u}"
-            return ParsedMeasurement(
-                value=value,
-                unit_raw=unit,
-                unit_canonical=canonical,
-                value_canonical=value,
-                pretty=f"{_pretty_number(value)} {canonical}",
-            )
-
-    if unit in MASS_FACTORS:
-        canonical_value = value * MASS_FACTORS[unit]
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit,
-            unit_canonical="g",
-            value_canonical=canonical_value,
-            pretty=f"{_pretty_number(canonical_value)} g",
-        )
-
-    if unit in VOLUME_FACTORS:
-        canonical_value = value * VOLUME_FACTORS[unit]
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit,
-            unit_canonical="L",
-            value_canonical=canonical_value,
-            pretty=f"{_pretty_number(canonical_value)} L",
-        )
-
-    if unit in AMOUNT_FACTORS:
-        canonical_value = value * AMOUNT_FACTORS[unit]
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit,
-            unit_canonical="mol",
-            value_canonical=canonical_value,
-            pretty=f"{_pretty_number(canonical_value)} mol",
-        )
-
-    if unit in {"mm[Hg]"}:
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit,
-            unit_canonical="mm[Hg]",
-            value_canonical=value,
-            pretty=f"{_pretty_number(value)} mm[Hg]",
-        )
-
-    if unit in DIMENSIONLESS_UNITS:
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit,
-            unit_canonical="scalar",
-            value_canonical=value,
-            pretty=_pretty_number(value),
-        )
-
-    if "log" in text.lower():
-        return ParsedMeasurement(
-            value=value,
-            unit_raw=unit or "log",
-            unit_canonical=unit or "log",
-            value_canonical=value,
-            pretty=f"{_pretty_number(value)} {unit or 'log'}",
-        )
+    pretty = _format_pretty(
+        base_value=base_value,
+        base_original=base_original,
+        exponent=exponent,
+        unit=unit,
+    )
 
     return ParsedMeasurement(
         value=value,
-        unit_raw=unit,
-        unit_canonical=unit or "scalar",
-        value_canonical=value,
-        pretty=_pretty_number(value) if not unit else f"{_pretty_number(value)} {unit}",
+        unit=unit,
+        value_canonical=value_canonical,
+        unit_canonical=unit_canonical,
+        pretty=pretty,
     )
+
+
+def normalize_exponent_for_display(text: str | None) -> str:
+    text = clean_text(text)
+    if not text:
+        return ""
+
+    text = text.replace("×", "x")
+    text = text.replace("µ", "μ")
+
+    def repl(match: re.Match) -> str:
+        base = match.group("base")
+        exp = match.group("exp")
+        exp = exp.translate(_SUP_TO_NORMAL)
+        return f"{base} x 10{_superscript(exp)}"
+
+    text = re.sub(
+        r"(?P<base>\d+(?:\.\d+)?)\s*[xX]\s*10\s*(?:\^\s*)?(?P<exp>[+\-]?\d+|[⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]+)",
+        repl,
+        text,
+    )
+
+    return text
